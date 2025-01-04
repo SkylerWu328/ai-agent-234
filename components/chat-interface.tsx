@@ -23,12 +23,34 @@ type StreamChunk = {
   }[]
 }
 
+// 添加新的类型定义
+type SearchResult = {
+  title: string;
+  snippet: string;
+  link: string;
+}
+
 // 添加配置常量
 const API_CONFIG = {
   baseUrl: 'https://api.siliconflow.cn/v1/chat/completions',
-  model: 'Qwen/Qwen2.5-7B-Instruct', // 选择您想使用的模型
+  model: 'deepseek-ai/DeepSeek-V2.5', // 选择您想使用的模型
   apiKey: process.env.NEXT_PUBLIC_SILICON_API_KEY || '', // 请确保在.env.local中设置此环境变量
+  searchEndpoint: '/api/search' // 我们需要创建这个API端点
 }
+
+// 添加一个格式化消息的辅助函数
+const formatAIMessage = (content: string) => {
+  // 处理数字列表 (1. 2. 3. 等)
+  const formattedContent = content.replace(/(\d+\.\s+)/g, '\n$1');
+  
+  // 处理bullet points
+  const withBullets = formattedContent.replace(/•/g, '\n•');
+  
+  // 处理段落 (通过双换行分隔)
+  const withParagraphs = withBullets.split('\n\n').join('\n\n');
+  
+  return withParagraphs;
+};
 
 const ChatInterface = () => {
   // 添加状态管理
@@ -52,6 +74,7 @@ const ChatInterface = () => {
   const [inputValue, setInputValue] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const [isWebEnabled, setIsWebEnabled] = useState(false)
   
   // 取消未完成的请求
   useEffect(() => {
@@ -81,6 +104,45 @@ const ChatInterface = () => {
     abortControllerRef.current = new AbortController()
 
     try {
+      let finalPrompt = inputValue;
+      
+      // 如果启用了联网功能，先进行网络搜索
+      if (isWebEnabled) {
+        try {
+          const searchResponse = await fetch(API_CONFIG.searchEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: inputValue }),
+          });
+          
+          if (!searchResponse.ok) throw new Error('搜索请求失败');
+          
+          const searchResults: SearchResult[] = await searchResponse.json();
+          
+          // 将搜索结果整合到提示中
+          finalPrompt = `
+基于以下搜索结果回答问题: "${inputValue}"
+
+搜索结果:
+${searchResults.map(result => `
+标题: ${result.title}
+摘要: ${result.snippet}
+链接: ${result.link}
+`).join('\n')}
+
+请根据以上搜索结果，提供一个全面的回答。
+`;
+        } catch (searchError) {
+          console.error('搜索过程出错:', searchError);
+          setMessages(prev => [...prev, {
+            id: Date.now(),
+            content: '搜索功能暂时不可用，将直接使用AI回答。',
+            role: 'ai'
+          }]);
+        }
+      }
+
+      // 后续的 API 调用逻辑保持不变，但使用 finalPrompt
       const response = await fetch(API_CONFIG.baseUrl, {
         method: 'POST',
         headers: {
@@ -92,7 +154,7 @@ const ChatInterface = () => {
           messages: [
             {
               role: 'user',
-              content: inputValue
+              content: finalPrompt
             }
           ],
           stream: true
@@ -141,7 +203,7 @@ const ChatInterface = () => {
         }
       }
     } catch (error) {
-      if (error.name === 'AbortError') {
+      if (error instanceof Error && error.name === 'AbortError') {
         console.log('请求被取消')
       } else {
         console.error('发送消息失败:', error)
@@ -171,12 +233,20 @@ const ChatInterface = () => {
                 </Avatar>
               )}
               <div className={`flex-1 ${message.role === 'user' ? 'max-w-[80%]' : ''}`}>
-                <div className={`rounded-lg p-4 ${
-                  message.role === 'user' 
-                    ? 'bg-primary text-primary-foreground' 
-                    : 'bg-muted'
-                }`}>
-                  {message.content}
+                <div 
+                  className={`rounded-lg p-4 ${
+                    message.role === 'user' 
+                      ? 'bg-primary text-primary-foreground' 
+                      : 'bg-muted'
+                  }`}
+                >
+                  {message.role === 'ai' ? (
+                    <div className="whitespace-pre-wrap">
+                      {formatAIMessage(message.content)}
+                    </div>
+                  ) : (
+                    message.content
+                  )}
                 </div>
               </div>
               {message.role === 'user' && (
@@ -202,7 +272,14 @@ const ChatInterface = () => {
             className="flex-1"
             disabled={isLoading}
           />
-          <Button variant="outline" size="icon" type="button" disabled={isLoading}>
+          <Button 
+            variant="outline" 
+            size="icon" 
+            type="button" 
+            disabled={isLoading}
+            onClick={() => setIsWebEnabled(!isWebEnabled)}
+            className={isWebEnabled ? 'bg-primary text-primary-foreground' : ''}
+          >
             <Globe className="h-4 w-4" />
           </Button>
           <Button variant="outline" size="icon" type="button" disabled={isLoading}>
