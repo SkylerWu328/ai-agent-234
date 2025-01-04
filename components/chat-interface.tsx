@@ -11,7 +11,7 @@ import { Paperclip, Globe, Mic, Send } from 'lucide-react'
 type Message = {
   id: number
   content: string
-  role: 'user' | 'ai'
+  role: 'user' | 'ai' | 'captain' | 'crew' | 'siren' | 'passenger'
 }
 
 // 添加类型定义
@@ -51,6 +51,40 @@ const formatAIMessage = (content: string) => {
   
   return withParagraphs;
 };
+
+// 添加角色配置
+const ROLES_CONFIG = {
+  captain: {
+    name: '老船长',
+    avatar: '👨‍✈️',
+    style: 'bg-blue-100 text-blue-900'
+  },
+  crew: {
+    name: '船员',
+    avatar: '👨‍🔧',
+    style: 'bg-gray-100 text-gray-900'
+  },
+  siren: {
+    name: '海妖塞壬',
+    avatar: '🧜‍♀️',
+    style: 'bg-purple-100 text-purple-900'
+  },
+  passenger: {
+    name: '乘客',
+    avatar: '🧑',
+    style: 'bg-green-100 text-green-900'
+  },
+  user: {
+    name: '用户',
+    avatar: 'U',
+    style: 'bg-primary text-primary-foreground'
+  },
+  ai: {
+    name: 'AI',
+    avatar: 'AI',
+    style: 'bg-muted'
+  }
+}
 
 const ChatInterface = () => {
   // 添加状态管理
@@ -104,7 +138,24 @@ const ChatInterface = () => {
     abortControllerRef.current = new AbortController()
 
     try {
-      let finalPrompt = inputValue;
+      let finalPrompt = `
+你是一个全知全能的AI，正观察着一艘正在沉没的游轮。请基于以下角色设定回应用户的输入：
+
+老船长：经验丰富，坚信大家能获救，领导力强。
+船员：胆小怕事，需要船长的鼓励。
+海妖塞壬：邪恶狡诈，用美妙的歌声蛊惑人心。
+乘客：普通人，恐慌且无助。
+
+用户输入: "${inputValue}"
+
+请依次用不同角色回应这个情况，每个角色的回应需要符合其性格特征。同时描述环境变化，并在对话中适当透露关键信息。
+每个角色的回应请使用以下格式：
+
+老船长: [回应内容]
+船员: [回应内容]
+海妖塞壬: [回应内容]
+乘客: [回应内容]
+`;
       
       // 如果启用了联网功能，先进行网络搜索
       if (isWebEnabled) {
@@ -178,6 +229,8 @@ ${searchResults.map(result => `
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
 
+      let accumulatedContent = '';
+      
       while (reader) {
         const { done, value } = await reader.read()
         if (done) break
@@ -190,12 +243,31 @@ ${searchResults.map(result => `
             try {
               const data: StreamChunk = JSON.parse(line.slice(6))
               const content = data.choices[0]?.delta?.content || ''
+              accumulatedContent += content;
               
-              setMessages(prev => prev.map(msg => 
-                msg.id === aiMessage.id 
-                  ? { ...msg, content: msg.content + content }
-                  : msg
-              ))
+              // 当收到完整的角色回应时，创建新消息
+              if (content.includes('\n')) {
+                const responses = accumulatedContent.split('\n');
+                for (const response of responses) {
+                  const roleMatch = response.match(/^(老船长|船员|海妖塞壬|乘客):\s*(.+)/);
+                  if (roleMatch) {
+                    const [_, roleName, roleContent] = roleMatch;
+                    const roleMap = {
+                      '老船长': 'captain',
+                      '船员': 'crew',
+                      '海妖塞壬': 'siren',
+                      '乘客': 'passenger'
+                    } as const;
+                    
+                    setMessages(prev => [...prev, {
+                      id: Date.now() + Math.random(),
+                      content: roleContent.trim(),
+                      role: roleMap[roleName as keyof typeof roleMap]
+                    }]);
+                  }
+                }
+                accumulatedContent = '';
+              }
             } catch (e) {
               console.error('解析响应数据失败:', e)
             }
@@ -226,33 +298,28 @@ ${searchResults.map(result => `
         <div className="space-y-4">
           {messages.map((message) => (
             <div key={message.id} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}>
-              {message.role === 'ai' && (
+              {message.role !== 'user' && (
                 <Avatar className="h-8 w-8">
-                  <AvatarImage src="/placeholder.svg" alt="AI Avatar" />
-                  <AvatarFallback>AI</AvatarFallback>
+                  <AvatarFallback>{ROLES_CONFIG[message.role].avatar}</AvatarFallback>
                 </Avatar>
               )}
               <div className={`flex-1 ${message.role === 'user' ? 'max-w-[80%]' : ''}`}>
+                {message.role !== 'user' && (
+                  <div className="text-sm text-gray-500 mb-1">
+                    {ROLES_CONFIG[message.role].name}
+                  </div>
+                )}
                 <div 
-                  className={`rounded-lg p-4 ${
-                    message.role === 'user' 
-                      ? 'bg-primary text-primary-foreground' 
-                      : 'bg-muted'
-                  }`}
+                  className={`rounded-lg p-4 ${ROLES_CONFIG[message.role].style}`}
                 >
-                  {message.role === 'ai' ? (
-                    <div className="whitespace-pre-wrap">
-                      {formatAIMessage(message.content)}
-                    </div>
-                  ) : (
-                    message.content
-                  )}
+                  <div className="whitespace-pre-wrap">
+                    {formatAIMessage(message.content)}
+                  </div>
                 </div>
               </div>
               {message.role === 'user' && (
                 <Avatar className="h-8 w-8">
-                  <AvatarImage src="/placeholder.svg" alt="User Avatar" />
-                  <AvatarFallback>U</AvatarFallback>
+                  <AvatarFallback>{ROLES_CONFIG.user.avatar}</AvatarFallback>
                 </Avatar>
               )}
             </div>
