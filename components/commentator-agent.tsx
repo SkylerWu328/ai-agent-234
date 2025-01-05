@@ -1,109 +1,140 @@
-import React, { useEffect, useState, useRef } from 'react';
-
-type Message = {
-  id: number;
-  role: 'user' | 'ai';
-  content: string;
-};
+import { useEffect, useState } from 'react'
+import { Card } from './ui/card'
+import { Avatar, AvatarFallback } from './ui/avatar'
 
 type CommentatorAgentProps = {
-  messages: Message[];
-};
+  messages: {
+    id: number
+    content: string
+    role: 'user' | 'ai' | 'captain' | 'crew' | 'siren'
+  }[]
+}
 
-// API配置复用现有的配置
-const API_CONFIG = {
-  baseUrl: 'https://api.siliconflow.cn/v1/chat/completions',
-  model: 'THUDM/glm-4-9b-chat',
-  apiKey: process.env.NEXT_PUBLIC_SILICON_API_KEY || '',
-};
-
-const COMMENTATOR_SYSTEM_PROMPT = `你是一个评论员，负责对用户提供的观点进行评论。你的评论需要包含以下要素：
-
-1.  提出与原观点相反或质疑的意见。
-2.  使用阴阳怪气的语气，例如讽刺、反问、暗示等。
-3.  字数限制在30字以内。
-4.  添加一个表示无奈、嘲讽或不屑的emoji。
-
-请注意避免人身攻击和过激言论。`;
-
-const CommentatorAgent: React.FC<CommentatorAgentProps> = ({ messages }) => {
-  const [comment, setComment] = useState<string>('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [lastMessageId, setLastMessageId] = useState<number>(0);
-  const isGeneratingRef = useRef(false);
-
-  const generateComment = async () => {
-    if (isGeneratingRef.current || 
-        messages.length === 0 || 
-        messages[messages.length - 1].id === lastMessageId) return;
-    
-    isGeneratingRef.current = true;
-    setIsLoading(true);
-    
-    try {
-      // 将对话历史格式化为文本
-      const conversationHistory = messages
-        .map(msg => `${msg.role === 'user' ? '用户' : 'AI'}: ${msg.content}`)
-        .join('\n');
-
-      const response = await fetch(API_CONFIG.baseUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${API_CONFIG.apiKey}`
-        },
-        body: JSON.stringify({
-          model: API_CONFIG.model,
-          messages: [
-            {
-              role: 'system',
-              content: COMMENTATOR_SYSTEM_PROMPT
-            },
-            {
-              role: 'user',
-              content: `请分析以下对话:\n\n${conversationHistory}`
-            }
-          ],
-          temperature: 0.7,
-          max_tokens: 150
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('评论生成失败');
-      }
-
-      const data = await response.json();
-      const commentText = data.choices[0]?.message?.content || '无法生成评论';
-      setComment(commentText);
-      
-      if (messages.length > 0) {
-        setLastMessageId(messages[messages.length - 1].id);
-      }
-
-    } catch (error) {
-      console.error('评论生成错误:', error);
-      setComment('评论生成失败，请稍后再试。');
-    } finally {
-      setIsLoading(false);
-      isGeneratingRef.current = false;
+// 添加 API 响应类型定义
+type ApiResponse = {
+  choices: [{
+    message: {
+      content: string
     }
-  };
+  }]
+}
+
+// 添加角色配置
+const ROLES_CONFIG = {
+  captain: {
+    name: '老船长',
+    avatar: '👨‍✈️',
+    style: 'bg-blue-50',
+    description: '经验丰富，坚信大家能获救，领导力强'
+  },
+  crew: {
+    name: '船员',
+    avatar: '👨‍🔧',
+    style: 'bg-gray-50',
+    description: '胆小怕事，需要船长的鼓励'
+  },
+  siren: {
+    name: '海妖塞壬',
+    avatar: '🧜‍♀️',
+    style: 'bg-purple-50',
+    description: '邪恶狡诈，用美妙的歌声蛊惑人心'
+  },
+  passenger: {
+    name: '乘客',
+    avatar: '🧑',
+    style: 'bg-green-50',
+    description: '普通人，恐慌且无助'
+  }
+}
+
+const CommentatorAgent = ({ messages }: CommentatorAgentProps) => {
+  const [agentResponses, setAgentResponses] = useState<{
+    captain: string
+    crew: string
+    siren: string
+    passenger: string
+  } | null>(null)
 
   useEffect(() => {
-    generateComment();
-  }, [messages]);
+    const lastMessage = messages[messages.length - 1]
+    if (!lastMessage || lastMessage.role !== 'ai') return
+
+    // 构建角色提示
+    const prompt = `
+你是一个全知全能的AI，正观察着一艘正在沉没的游轮。请基于以下角色设定，对刚才的对话进行评论：
+
+用户说: "${messages[messages.length - 2]?.content || ''}"
+AI回答: "${lastMessage.content}"
+
+请从以下角色的视角分别进行评论，每个角色的评论要以"角色名："开头：
+
+老船长：经验丰富，坚信大家能获救，领导力强。
+船员：胆小怕事，需要船长的鼓励。
+海妖塞壬：邪恶狡诈，用美妙的歌声蛊惑人心。
+乘客：普通人，恐慌且无助。
+
+每个角色的评论要符合其性格特征，并且要对当前对话内容进行有意义的评论。
+`
+    // 发送评论请求
+    fetch('https://api.siliconflow.cn/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SILICON_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'Qwen/Qwen2.5-7B-Instruct',
+        messages: [{ role: 'user', content: prompt }],
+        stream: false
+      })
+    })
+    .then(res => res.json())
+    .then((data: ApiResponse) => {
+      const content = data.choices[0].message.content
+      const responses = {
+        captain: '',
+        crew: '',
+        siren: '',
+        passenger: ''
+      }
+
+      // 解析每个角色的回应
+      content.split('\n').forEach((line: string) => {
+        if (line.startsWith('老船长：')) responses.captain = line.slice(4)
+        if (line.startsWith('船员：')) responses.crew = line.slice(3)
+        if (line.startsWith('海妖塞壬：')) responses.siren = line.slice(5)
+        if (line.startsWith('乘客：')) responses.passenger = line.slice(3)
+      })
+
+      setAgentResponses(responses)
+    })
+    .catch(console.error)
+  }, [messages])
+
+  if (!agentResponses) return null
 
   return (
-    <div className="p-4 bg-gray-100 rounded-lg shadow-md">
-      <h3 className="font-bold mb-2">评论员的思考</h3>
-      {isLoading ? (
-        <p className="text-gray-500">正在分析对话...</p>
-      ) : (
-        <p className="text-gray-700">{comment}</p>
-      )}
+    <div className="space-y-2">
+      <h3 className="text-sm font-medium text-gray-500">角色评论：</h3>
+      <div className="grid grid-cols-2 gap-2">
+        {Object.entries(ROLES_CONFIG).map(([key, role]) => (
+          <Card key={key} className={`p-3 ${role.style}`}>
+            <div className="flex items-start gap-2">
+              <Avatar className="h-8 w-8">
+                <AvatarFallback>{role.avatar}</AvatarFallback>
+              </Avatar>
+              <div className="flex-1">
+                <div className="text-xs text-gray-500 mb-1">{role.name}</div>
+                <div className="text-sm">
+                  {agentResponses?.[key as keyof typeof agentResponses] || ''}
+                </div>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
     </div>
-  );
-};
+  )
+}
 
-export default CommentatorAgent; 
+export default CommentatorAgent 

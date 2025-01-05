@@ -7,12 +7,13 @@ import { Card, CardContent, CardFooter } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Paperclip, Globe, Mic, Send } from 'lucide-react'
 import CommentatorAgent from "@/components/commentator-agent"
+import { ROLES_CONFIG } from '@/lib/config'
 
 // 定义消息类型
 type Message = {
   id: number
   content: string
-  role: 'user' | 'ai'
+  role: 'user' | 'ai' | 'captain' | 'crew' | 'siren'
 }
 
 // 添加类型定义
@@ -205,7 +206,7 @@ const ChatInterface = () => {
         console.error('发送消息失败:', error)
         // 添加错误提示消息
         setMessages(prev => [...prev, {
-          id: Date.now() + 2,
+            id: Date.now() + 2,
           content: '抱歉，发送消息时出现错误。',
           role: 'ai'
         }])
